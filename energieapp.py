@@ -3,102 +3,109 @@ import pandas as pd
 import plotly.express as px
 
 st.set_page_config(page_title="Energie Dashboard", layout="wide")
-st.title("🔋 Interactief Energie Dashboard energie")
+st.title("🔋 Interactief Energie Dashboard")
 
-# Upload meerdere CSV-bestanden
+# Upload CSV-bestanden
 uploaded_files = st.file_uploader("📤 Upload één of meerdere CSV-bestanden", type=["csv"], accept_multiple_files=True)
 
 if uploaded_files:
     dataframes = []
     for file in uploaded_files:
         try:
-            df = pd.read_csv(file, encoding='utf-8', sep=None, engine='python')  # Detectie van delimiter
+            df = pd.read_csv(file, encoding='utf-8', sep=None, engine='python')
             dataframes.append(df)
         except Exception as e:
             st.error(f"❌ Fout bij inlezen van {file.name}: {str(e)}")
 
-    # Merge alle bestanden
+    # Combineer data
     data = pd.concat(dataframes, ignore_index=True)
-
-    # Voorbewerking
     data.columns = data.columns.str.strip()
     data = data.rename(columns={data.columns[0]: 'Timestamp'})
 
-    # Tijdzone weghalen (alles na '+') in Timestamp voor correcte conversie
     data['Timestamp_clean'] = data['Timestamp'].astype(str).str.split('+').str[0]
-
-    # Converteer naar datetime zonder timezone info
     data['Timestamp'] = pd.to_datetime(data['Timestamp_clean'], errors='coerce')
-
-    # Tijdelijke kolom verwijderen
     data.drop(columns=['Timestamp_clean'], inplace=True)
-
-    # Verwijder rijen zonder geldige Timestamp
     data = data.dropna(subset=['Timestamp'])
 
-    # Tijdcomponenten afleiden
+    # Tijdcomponenten
     data['Jaar'] = data['Timestamp'].dt.year
     data['Maand'] = data['Timestamp'].dt.month
     data['Dag'] = data['Timestamp'].dt.day
     data['Uur'] = data['Timestamp'].dt.hour
 
     tijd_kolommen = ['Timestamp', 'Jaar', 'Maand', 'Dag', 'Uur']
-    categorie_kolommen = [col for col in data.columns if col not in tijd_kolommen]
+    waarde_kolommen = [col for col in data.columns if col not in tijd_kolommen]
 
-    # Melt naar lange tabel
-    data_melted = data.melt(id_vars=tijd_kolommen, value_vars=categorie_kolommen,
+    data_melted = data.melt(id_vars=tijd_kolommen, value_vars=waarde_kolommen,
                             var_name='Categorie', value_name='Waarde')
 
-    # Verwijder eenheden uit waarden
+    # Waarde opschonen
     data_melted['Waarde'] = data_melted['Waarde'].astype(str).str.extract(r'([\d\.,]+)')[0]
-    data_melted['Waarde'] = data_melted['Waarde'].str.replace(',', '.')
+    data_melted['Waarde'] = data_melted['Waarde'].str.replace(',', '.', regex=False)
     data_melted['Waarde'] = pd.to_numeric(data_melted['Waarde'], errors='coerce')
 
-    # Filters
-    st.sidebar.header("🔍 Filters")
+    # 🔍 Filter: Categorie
+    st.sidebar.header("📦 Filters")
+    categorieen = sorted(data_melted['Categorie'].dropna().unique())
+    geselecteerde_categorieen = st.sidebar.multiselect("Selecteer categorieën", categorieen, default=categorieen)
 
-    jaren = st.sidebar.multiselect("Selecteer Jaar", sorted(data_melted['Jaar'].dropna().unique()), default=None)
-    maanden = st.sidebar.multiselect("Selecteer Maand", sorted(data_melted['Maand'].dropna().unique()), default=None)
-    dagen = st.sidebar.multiselect("Selecteer Dag", sorted(data_melted['Dag'].dropna().unique()), default=None)
-    uren = st.sidebar.multiselect("Selecteer Uur", sorted(data_melted['Uur'].dropna().unique()), default=None)
-    categorieen = st.sidebar.multiselect("Selecteer Categorieën", sorted(data_melted['Categorie'].unique()), default=None)
+    data_filtered = data_melted[data_melted['Categorie'].isin(geselecteerde_categorieen)]
 
-    gefilterd = data_melted.copy()
+    # 🔍 Filter: Jaar, Maand, Dag
+    beschikbare_jaren = sorted(data_filtered['Jaar'].dropna().unique())
+    jaar_selectie = st.selectbox("📅 Selecteer jaar", beschikbare_jaren, index=len(beschikbare_jaren) - 1)
 
-    if jaren:
-        gefilterd = gefilterd[gefilterd['Jaar'].isin(jaren)]
-    if maanden:
-        gefilterd = gefilterd[gefilterd['Maand'].isin(maanden)]
-    if dagen:
-        gefilterd = gefilterd[gefilterd['Dag'].isin(dagen)]
-    if uren:
-        gefilterd = gefilterd[gefilterd['Uur'].isin(uren)]
-    if categorieen:
-        gefilterd = gefilterd[gefilterd['Categorie'].isin(categorieen)]
+    beschikbare_maanden = sorted(data_filtered[data_filtered['Jaar'] == jaar_selectie]['Maand'].unique())
+    maand_selectie = st.selectbox("🗓️ Selecteer maand", beschikbare_maanden)
 
-    # Grafiek
-    st.subheader("📈 Grafiek")
+    beschikbare_dagen = sorted(data_filtered[(data_filtered['Jaar'] == jaar_selectie) & (data_filtered['Maand'] == maand_selectie)]['Dag'].unique())
+    dag_selectie = st.selectbox("📆 Selecteer dag", beschikbare_dagen)
 
-    if not gefilterd.empty:
-        fig = px.line(gefilterd,
-                      x="Timestamp",
-                      y="Waarde",
-                      color="Categorie",
-                      title="Waarden per tijdstip",
-                      markers=True)
-        fig.update_layout(xaxis_title="Tijd", yaxis_title="Waarde")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("⚠️ Geen data beschikbaar voor deze filtercombinatie.")
+    # ======================= GRAFIEK 1: Jaar (per maand) =======================
+    st.subheader(f"📊 Jaaroverzicht: totaal per maand ({jaar_selectie})")
+    jaar_data = data_filtered[data_filtered['Jaar'] == jaar_selectie]
 
-    # Gemiddeldes tonen
-    st.subheader("📊 Gemiddeldes")
-    gemiddelde_per_categorie = gefilterd.groupby('Categorie')['Waarde'].mean().round(2).reset_index()
-    st.dataframe(gemiddelde_per_categorie.rename(columns={'Waarde': 'Gemiddelde'}))
+    maand_aggregatie = jaar_data.groupby(['Maand', 'Categorie'])['Waarde'].sum().reset_index()
 
-    # Preview data
-    with st.expander("📄 Bekijk gefilterde gegevens"):
-        st.dataframe(gefilterd.head(100))
+    fig_jaar = px.bar(
+        maand_aggregatie,
+        x='Maand', y='Waarde', color='Categorie', barmode='group',
+        labels={'Waarde': 'Totaal', 'Maand': 'Maand'},
+        title=f"Maandtotalen voor {jaar_selectie}"
+    )
+    st.plotly_chart(fig_jaar, use_container_width=True)
+
+    # ======================= GRAFIEK 2: Maand (per dag) =======================
+    st.subheader(f"📆 Maandoverzicht: totaal per dag ({jaar_selectie}-{maand_selectie})")
+    maand_data = jaar_data[jaar_data['Maand'] == maand_selectie]
+
+    dag_aggregatie = maand_data.groupby(['Dag', 'Categorie'])['Waarde'].sum().reset_index()
+
+    fig_maand = px.bar(
+        dag_aggregatie,
+        x='Dag', y='Waarde', color='Categorie', barmode='group',
+        labels={'Waarde': 'Totaal', 'Dag': 'Dag'},
+        title=f"Dagtotalen voor {jaar_selectie}-{maand_selectie}"
+    )
+    st.plotly_chart(fig_maand, use_container_width=True)
+
+    # ======================= GRAFIEK 3: Dag (per uur) =======================
+    st.subheader(f"⏰ Dagoverzicht: totaal per uur ({dag_selectie}-{maand_selectie}-{jaar_selectie})")
+    dag_data = maand_data[maand_data['Dag'] == dag_selectie]
+
+    uur_aggregatie = dag_data.groupby(['Uur', 'Categorie'])['Waarde'].sum().reset_index()
+
+    fig_dag = px.bar(
+        uur_aggregatie,
+        x='Uur', y='Waarde', color='Categorie', barmode='group',
+        labels={'Waarde': 'Totaal', 'Uur': 'Uur'},
+        title=f"Uurtotalen voor {dag_selectie}-{maand_selectie}-{jaar_selectie}"
+    )
+    st.plotly_chart(fig_dag, use_container_width=True)
+
+    # Preview
+    with st.expander("📄 Bekijk ruwe data"):
+        st.dataframe(data_filtered.head(100))
 
 else:
-    st.info("📥 Upload één of meerdere CSV-bestanden om te beginnen.")     
+    st.info("📥 Upload één of meerdere CSV-bestanden om te beginnen.")
