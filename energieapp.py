@@ -72,30 +72,36 @@ if uploaded_files:
 
     # --- Bereken basisverbruik per categorie tussen 00:00 en 04:00 voor alle nachten ---
     
-    # Selecteer data tussen 00:00 en 04:00
-    nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] < 5)]
+    # Selecteer data tussen 00:00 en 05:00
+    nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] < 5)].copy()
     
     # Voeg een kolom toe met alleen de datum (zonder tijd)
     nacht_data['Datum'] = nacht_data['Timestamp'].dt.date
     
-    # Gemiddeld verbruik per kolom per nacht (over 4 uren)
+    # Gemiddeld verbruik per kolom per nacht (over 5 uren)
     gemiddeld_per_nacht = nacht_data.groupby('Datum')[waarde_kolommen].mean()
     
-    # Gemiddelde over alle nachten per kolom (basisverbruik)
+    # Sorteer op datum en pak de laatste 20 nachten
+    laatste_20_nachten = gemiddeld_per_nacht.sort_index(ascending=False).head(20)
+    
+    # Gemiddelde over de laatste 20 nachten per kolom (basisverbruik)
     basiswaarden = {}
     for col in waarde_kolommen:
-        basiswaarden[col] = gemiddeld_per_nacht[col].mean()
+        basiswaarden[col] = laatste_20_nachten[col].mean()
         if pd.isna(basiswaarden[col]):
             basiswaarden[col] = 0
     
     # Trek basisverbruik af van elke waarde in data (per kolom)
     for col in waarde_kolommen:
         data[col] = data[col] - basiswaarden[col]
-
-
+    
     # Smelt data voor visualisaties
-    data_melted = data.melt(id_vars=tijd_kolommen, value_vars=waarde_kolommen,
-                            var_name='Categorie', value_name='Waarde')
+    data_melted = data.melt(
+        id_vars=tijd_kolommen,
+        value_vars=waarde_kolommen,
+        var_name='Categorie',
+        value_name='Waarde'
+    )
 
     # Filters bovenaan
     st.header("📦 Filters")
