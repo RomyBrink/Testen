@@ -73,7 +73,7 @@ if uploaded_files:
     # --- Bereken basisverbruik per categorie tussen 00:00 en 04:00 voor alle nachten ---
     
     # Selecteer data tussen 00:00 en 04:00
-    nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] < 4)]
+    nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] < 5)]
     
     # Voeg een kolom toe met alleen de datum (zonder tijd)
     nacht_data['Datum'] = nacht_data['Timestamp'].dt.date
