@@ -40,13 +40,14 @@ if uploaded_files:
     ]
     data = data.drop(columns=[col for col in te_verwijderen_kolommen if col in data.columns])
 
-    # Timestamp verwerken
+    # ** Basisverbruikscorrectie toevoegen **
+
+    # Tijdcomponenten voorlopig nodig om te filteren (tijd verwerken voorlopig met minimal parsing)
     data['Timestamp_clean'] = data['Timestamp'].astype(str).str.split('+').str[0]
     data['Timestamp'] = pd.to_datetime(data['Timestamp_clean'], errors='coerce')
     data.drop(columns=['Timestamp_clean'], inplace=True)
     data = data.dropna(subset=['Timestamp'])
 
-    # Tijdcomponenten
     data['Jaar'] = data['Timestamp'].dt.year
     data['Maand'] = data['Timestamp'].dt.month
     data['Dag'] = data['Timestamp'].dt.day
@@ -55,6 +56,37 @@ if uploaded_files:
     tijd_kolommen = ['Timestamp', 'Jaar', 'Maand', 'Dag', 'Uur']
     waarde_kolommen = [col for col in data.columns if col not in tijd_kolommen]
 
+    # Filter uren 0 t/m 4
+    nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] <= 4)]
+
+    # Selecteer 5 willekeurige nachten (jaar-maand-dag)
+    unieke_nachten = nacht_data[['Jaar', 'Maand', 'Dag']].drop_duplicates()
+    if len(unieke_nachten) >= 5:
+        random_nachten = unieke_nachten.sample(5, random_state=42)
+    else:
+        random_nachten = unieke_nachten
+
+    # Filter nacht_data op geselecteerde nachten
+    mask = nacht_data.apply(lambda row: ((row['Jaar'], row['Maand'], row['Dag']) 
+                                        in list(random_nachten.itertuples(index=False, name=None))), axis=1)
+    nacht_data_geselecteerd = nacht_data[mask]
+
+    # Bereken basiswaarden per categorie
+    basiswaarden = {}
+    for col in waarde_kolommen:
+        basiswaarden[col] = nacht_data_geselecteerd[col].mean()
+
+    # Trek basiswaarden af van alle waarden
+    for col in waarde_kolommen:
+        if col in data.columns:
+            data[col] = data[col] - basiswaarden[col]
+
+    # Voorkom negatieve waarden
+    for col in waarde_kolommen:
+        if col in data.columns:
+            data[col] = data[col].clip(lower=0)
+
+    # Nu data opnieuw smelten en verder verwerken
     data_melted = data.melt(id_vars=tijd_kolommen, value_vars=waarde_kolommen,
                             var_name='Categorie', value_name='Waarde')
 
