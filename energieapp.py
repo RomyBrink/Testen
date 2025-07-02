@@ -154,39 +154,6 @@ if uploaded_files:
     )
     st.plotly_chart(fig_dag, use_container_width=True)
 
-    # ========== GRAFIEK 4: Heatmap gestandaardiseerde uitschieters ==========
-    st.subheader("🌡️ Heatmap uitschieters per categorie per maand")
-
-    heatmap_data = data_filtered.copy()
-
-    # Bereken mean en std per categorie
-    stats = heatmap_data.groupby('Categorie')['Waarde'].agg(['mean', 'std']).reset_index()
-
-    # Voeg stats toe aan heatmap_data voor standaardiseren
-    heatmap_data = heatmap_data.merge(stats, on='Categorie', how='left')
-
-    # Standaardiseer de waarden per categorie
-    heatmap_data['Waarde_std'] = (heatmap_data['Waarde'] - heatmap_data['mean']) / heatmap_data['std']
-
-    # Groepeer per categorie en maand (gemiddelde gestandaardiseerde waarde)
-    heatmap_agg = heatmap_data.groupby(['Categorie', 'Maand'])['Waarde_std'].mean().reset_index()
-
-    # Pivot voor heatmap (Categorieën als rijen, Maanden als kolommen)
-    heatmap_pivot = heatmap_agg.pivot(index='Categorie', columns='Maand', values='Waarde_std').fillna(0)
-
-    # Plot heatmap
-    fig_heatmap = px.imshow(
-        heatmap_pivot,
-        labels=dict(x="Maand", y="Categorie", color="Gestandaardiseerde waarde"),
-        x=heatmap_pivot.columns,
-        y=heatmap_pivot.index,
-        color_continuous_scale='RdBu',
-        zmin=-3, zmax=3,  # Kleurenschaal gefixeerd op ±3 std-dev om uitschieters te benadrukken
-        title="Heatmap van gestandaardiseerde waarden per categorie per maand"
-    )
-
-    st.plotly_chart(fig_heatmap, use_container_width=True)
-
     # Preview ruwe data
     with st.expander("📄 Bekijk ruwe data"):
         st.dataframe(data_filtered.head(100))
