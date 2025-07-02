@@ -77,8 +77,8 @@ if uploaded_files:
 
     # Kies 5 random nachten (jaar-maand-dag combinaties)
     unieke_nachten = nacht_data[['Jaar', 'Maand', 'Dag']].drop_duplicates()
-    if len(unieke_nachten) >= 5:
-        random_nachten = unieke_nachten.sample(5, random_state=42)
+    if len(unieke_nachten) >= 10:
+        random_nachten = unieke_nachten.sample(10, random_state=42)
     else:
         random_nachten = unieke_nachten  # Als minder dan 5 nachten beschikbaar zijn
 
