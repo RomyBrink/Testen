@@ -73,7 +73,9 @@ if uploaded_files:
 
     # Bereken basiswaarden per categorie
     basiswaarden = {}
+
     for col in waarde_kolommen:
+        nacht_data_geselecteerd[col] = pd.to_numeric(nacht_data_geselecteerd[col], errors='coerce')
         basiswaarden[col] = nacht_data_geselecteerd[col].mean()
 
     # Trek basiswaarden af van alle waarden
