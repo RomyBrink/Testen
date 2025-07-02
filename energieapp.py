@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
+import re
+import random
 
 st.set_page_config(page_title="Energie Dashboard", layout="wide")
 st.title("🔋 Interactief Energie Dashboard")
@@ -46,7 +48,7 @@ if uploaded_files:
     data.drop(columns=['Timestamp_clean'], inplace=True)
     data = data.dropna(subset=['Timestamp'])
 
-    # Tijdcomponenten
+    # Tijdcomponenten toevoegen
     data['Jaar'] = data['Timestamp'].dt.year
     data['Maand'] = data['Timestamp'].dt.month
     data['Dag'] = data['Timestamp'].dt.day
@@ -55,31 +57,46 @@ if uploaded_files:
     tijd_kolommen = ['Timestamp', 'Jaar', 'Maand', 'Dag', 'Uur']
     waarde_kolommen = [col for col in data.columns if col not in tijd_kolommen]
 
-    # Basiswaarden berekenen: gemiddeld tussen 00:00-04:00 van 5 willekeurige nachten
+    # Waarden schoonmaken: letters eruit, komma naar punt, etc.
+    def clean_value(val):
+        if pd.isna(val):
+            return np.nan
+        val_str = str(val)
+        cleaned = re.sub(r'[^\d\.,-]', '', val_str)  # alles behalve cijfers, komma, punt en min teken verwijderen
+        cleaned = cleaned.replace(',', '.')
+        return cleaned
+
+    for col in waarde_kolommen:
+        data[col] = data[col].apply(clean_value)
+        data[col] = pd.to_numeric(data[col], errors='coerce').fillna(0)
+
+    # --- Bereken basisverbruik per categorie tussen 00:00 en 04:00 op 5 random nachten ---
+
+    # Selecteer data tussen 00:00 en 04:00
+    nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] < 4)]
+
+    # Kies 5 random nachten (jaar-maand-dag combinaties)
+    unieke_nachten = nacht_data[['Jaar', 'Maand', 'Dag']].drop_duplicates()
+    if len(unieke_nachten) >= 5:
+        random_nachten = unieke_nachten.sample(5, random_state=42)
+    else:
+        random_nachten = unieke_nachten  # Als minder dan 5 nachten beschikbaar zijn
+
+    # Filter nacht_data voor die gekozen nachten
+    nacht_data_geselecteerd = pd.merge(nacht_data, random_nachten, on=['Jaar', 'Maand', 'Dag'], how='inner')
+
+    # Gemiddelde per categorie berekenen voor basisverbruik
     basiswaarden = {}
-    # Neem unieke dagen (Timestamp datum zonder tijd)
-    data['Datum'] = data['Timestamp'].dt.floor('D')
-    unieke_dagen = data['Datum'].drop_duplicates().sample(n=5, random_state=42) if len(data['Datum'].unique()) >= 5 else data['Datum'].drop_duplicates()
-    
-    # Filter op de geselecteerde nachten en uren 0-4
-    nacht_data_geselecteerd = data[(data['Datum'].isin(unieke_dagen)) & (data['Uur'].between(0, 4))].copy()
-
     for col in waarde_kolommen:
-        # Converteer naar numeriek, niet numerieke waarden worden NaN
-        nacht_data_geselecteerd[col] = pd.to_numeric(nacht_data_geselecteerd[col].astype(str).str.replace(',', '.'), errors='coerce')
-        # Vul NaN met 0 voor gemiddelde berekening
-        basiswaarde = nacht_data_geselecteerd[col].fillna(0).mean()
-        basiswaarden[col] = basiswaarde
+        basiswaarden[col] = nacht_data_geselecteerd[col].mean()
+        if pd.isna(basiswaarden[col]):
+            basiswaarden[col] = 0
 
-    # Zet ook in de volledige data de waardes om naar numeriek
+    # Trek basisverbruik af van elke waarde in data
     for col in waarde_kolommen:
-        data[col] = pd.to_numeric(data[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-        # Trek basiswaarde af
         data[col] = data[col] - basiswaarden[col]
-        # Ondergrens 0
-        data[col] = data[col].clip(lower=0)
 
-    # Data opnieuw 'smelten'
+    # Smelt data voor visualisaties
     data_melted = data.melt(id_vars=tijd_kolommen, value_vars=waarde_kolommen,
                             var_name='Categorie', value_name='Waarde')
 
@@ -161,7 +178,7 @@ if uploaded_files:
     st.plotly_chart(fig_maand, use_container_width=True)
 
     # ========== GRAFIEK 3: Dagoverzicht (per uur) ==========
-    st.subheader(f"⏰ Dagoverzicht: totaal per uur ({dag_selectie}-{maand_selectie}-{jaar_selectie})")
+    st.subheader(f"⏰ Dagoverzicht: totaal per uur ({jaar_selectie}-{maand_selectie}-{dag_selectie})")
     dag_data = maand_data[maand_data['Dag'] == dag_selectie]
 
     uur_aggregatie = dag_data.groupby(['Uur', 'Categorie'])['Waarde'].sum().reset_index()
@@ -169,14 +186,10 @@ if uploaded_files:
     fig_dag = px.bar(
         uur_aggregatie,
         x='Uur', y='Waarde', color='Categorie', barmode='group',
-        labels={'Waarde': 'Totaal', 'Uur': 'Uur'},
-        title=f"Uurtotalen voor {dag_selectie}-{maand_selectie}-{jaar_selectie}"
+        labels={'Waarde': 'Totaal', 'Uur': 'Uur van de dag'},
+        title=f"Uurtotalen voor {jaar_selectie}-{maand_selectie}-{dag_selectie}"
     )
     st.plotly_chart(fig_dag, use_container_width=True)
 
-    # Preview ruwe data
-    with st.expander("📄 Bekijk ruwe data"):
-        st.dataframe(data_filtered.head(100))
-
 else:
-    st.info("📥 Upload één of meerdere CSV-bestanden om te beginnen.")
+    st.info("Upload één of meerdere CSV-bestanden om te beginnen.")
