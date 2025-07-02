@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 import plotly.express as px
 
 st.set_page_config(page_title="Energie Dashboard", layout="wide")
 st.title("🔋 Interactief Energie Dashboard")
 
-# Upload CSV-bestanden
 uploaded_files = st.file_uploader("📤 Upload één of meerdere CSV-bestanden", type=["csv"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -17,17 +17,14 @@ if uploaded_files:
         except Exception as e:
             st.error(f"❌ Fout bij inlezen van {file.name}: {str(e)}")
 
-    # Combineer data
     data = pd.concat(dataframes, ignore_index=True)
     data.columns = data.columns.str.strip()
     data = data.rename(columns={data.columns[0]: 'Timestamp'})
-
     data['Timestamp_clean'] = data['Timestamp'].astype(str).str.split('+').str[0]
     data['Timestamp'] = pd.to_datetime(data['Timestamp_clean'], errors='coerce')
     data.drop(columns=['Timestamp_clean'], inplace=True)
     data = data.dropna(subset=['Timestamp'])
 
-    # Tijdcomponenten
     data['Jaar'] = data['Timestamp'].dt.year
     data['Maand'] = data['Timestamp'].dt.month
     data['Dag'] = data['Timestamp'].dt.day
@@ -39,43 +36,73 @@ if uploaded_files:
     data_melted = data.melt(id_vars=tijd_kolommen, value_vars=waarde_kolommen,
                             var_name='Categorie', value_name='Waarde')
 
-    # Waarde opschonen
     data_melted['Waarde'] = data_melted['Waarde'].astype(str).str.extract(r'([\d\.,]+)')[0]
     data_melted['Waarde'] = data_melted['Waarde'].str.replace(',', '.', regex=False)
     data_melted['Waarde'] = pd.to_numeric(data_melted['Waarde'], errors='coerce')
 
-    # 🔍 Filter: Categorie
-    st.sidebar.header("📦 Filters")
-    categorieen = sorted(data_melted['Categorie'].dropna().unique())
-    geselecteerde_categorieen = st.sidebar.multiselect("Selecteer categorieën", categorieen, default=categorieen)
+    st.header("📦 Filters")
 
+    # Categorie filter
+    categorieen = sorted(data_melted['Categorie'].dropna().unique())
+    geselecteerde_categorieen = st.multiselect("Selecteer categorieën", categorieen, default=categorieen)
     data_filtered = data_melted[data_melted['Categorie'].isin(geselecteerde_categorieen)]
 
-    # 🔍 Filter: Jaar, Maand, Dag
+    # Jaar filter
     beschikbare_jaren = sorted(data_filtered['Jaar'].dropna().unique())
     jaar_selectie = st.selectbox("📅 Selecteer jaar", beschikbare_jaren, index=len(beschikbare_jaren) - 1)
 
+    # Maand filter
     beschikbare_maanden = sorted(data_filtered[data_filtered['Jaar'] == jaar_selectie]['Maand'].unique())
     maand_selectie = st.selectbox("🗓️ Selecteer maand", beschikbare_maanden)
 
+    # Dag filter
     beschikbare_dagen = sorted(data_filtered[(data_filtered['Jaar'] == jaar_selectie) & (data_filtered['Maand'] == maand_selectie)]['Dag'].unique())
     dag_selectie = st.selectbox("📆 Selecteer dag", beschikbare_dagen)
 
-    # ======================= GRAFIEK 1: Jaar (per maand) =======================
+    # =================== GRAFIEK 1: Jaar met trendlijn ===================
     st.subheader(f"📊 Jaaroverzicht: totaal per maand ({jaar_selectie})")
-    jaar_data = data_filtered[data_filtered['Jaar'] == jaar_selectie]
 
+    jaar_data = data_filtered[data_filtered['Jaar'] == jaar_selectie]
     maand_aggregatie = jaar_data.groupby(['Maand', 'Categorie'])['Waarde'].sum().reset_index()
 
-    fig_jaar = px.bar(
-        maand_aggregatie,
-        x='Maand', y='Waarde', color='Categorie', barmode='group',
-        labels={'Waarde': 'Totaal', 'Maand': 'Maand'},
-        title=f"Maandtotalen voor {jaar_selectie}"
-    )
-    st.plotly_chart(fig_jaar, use_container_width=True)
+    vorig_jaar = jaar_selectie - 1
+    vorig_jaar_data = data_filtered[data_filtered['Jaar'] == vorig_jaar]
+    maand_aggregatie_vorig_jaar = vorig_jaar_data.groupby(['Maand', 'Categorie'])['Waarde'].sum().reset_index()
 
-    # ======================= GRAFIEK 2: Maand (per dag) =======================
+    fig = go.Figure()
+
+    # Bar per categorie huidig jaar
+    for cat in geselecteerde_categorieen:
+        df_cat = maand_aggregatie[maand_aggregatie['Categorie'] == cat]
+        fig.add_trace(go.Bar(
+            x=df_cat['Maand'],
+            y=df_cat['Waarde'],
+            name=f"{cat} {jaar_selectie}",
+            offsetgroup=cat
+        ))
+
+    # Lijn per categorie vorig jaar
+    for cat in geselecteerde_categorieen:
+        df_cat_vorig = maand_aggregatie_vorig_jaar[maand_aggregatie_vorig_jaar['Categorie'] == cat]
+        fig.add_trace(go.Scatter(
+            x=df_cat_vorig['Maand'],
+            y=df_cat_vorig['Waarde'],
+            mode='lines+markers',
+            name=f"{cat} {vorig_jaar} (trend)",
+            line=dict(dash='dash')
+        ))
+
+    fig.update_layout(
+        barmode='group',
+        xaxis_title='Maand',
+        yaxis_title='Totaal',
+        title=f"Maandtotalen {jaar_selectie} en trendlijn {vorig_jaar}",
+        legend_title="Categorie / Jaar"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # =================== GRAFIEK 2: Maand (per dag) ===================
     st.subheader(f"📆 Maandoverzicht: totaal per dag ({jaar_selectie}-{maand_selectie})")
     maand_data = jaar_data[jaar_data['Maand'] == maand_selectie]
 
@@ -89,7 +116,7 @@ if uploaded_files:
     )
     st.plotly_chart(fig_maand, use_container_width=True)
 
-    # ======================= GRAFIEK 3: Dag (per uur) =======================
+    # =================== GRAFIEK 3: Dag (per uur) ===================
     st.subheader(f"⏰ Dagoverzicht: totaal per uur ({dag_selectie}-{maand_selectie}-{jaar_selectie})")
     dag_data = maand_data[maand_data['Dag'] == dag_selectie]
 
@@ -103,7 +130,7 @@ if uploaded_files:
     )
     st.plotly_chart(fig_dag, use_container_width=True)
 
-    # Preview
+    # Preview ruwe data
     with st.expander("📄 Bekijk ruwe data"):
         st.dataframe(data_filtered.head(100))
 
