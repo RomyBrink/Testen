@@ -87,10 +87,19 @@ if uploaded_files:
 
     # Gemiddelde per categorie berekenen voor basisverbruik
     basiswaarden = {}
+        
+    # Voeg een kolom toe om nachten te groeperen
+    nacht_data_geselecteerd['Datum'] = nacht_data_geselecteerd['Timestamp'].dt.date
+    
+    # Gemiddeld per nacht berekenen
+    gemiddeld_per_nacht = nacht_data_geselecteerd.groupby(['Datum'])[waarde_kolommen].mean()
+    
+    # Dan het gemiddelde van die nachten
     for col in waarde_kolommen:
-        basiswaarden[col] = nacht_data_geselecteerd[col].mean()
+        basiswaarden[col] = gemiddeld_per_nacht[col].mean()
         if pd.isna(basiswaarden[col]):
             basiswaarden[col] = 0
+
 
     # Trek basisverbruik af van elke waarde in data
     for col in waarde_kolommen:
