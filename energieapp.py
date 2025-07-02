@@ -70,45 +70,25 @@ if uploaded_files:
         data[col] = data[col].apply(clean_value)
         data[col] = pd.to_numeric(data[col], errors='coerce').fillna(0)
 
-    # --- Bereken basisverbruik per categorie tussen 00:00 en 04:00 op 20 random nachten ---
-
+    # --- Bereken basisverbruik per categorie tussen 00:00 en 04:00 voor alle nachten ---
+    
     # Selecteer data tussen 00:00 en 04:00
     nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] < 4)]
     
-    # Maak een 'Datum' kolom om nachten te onderscheiden
+    # Voeg een kolom toe met alleen de datum (zonder tijd)
     nacht_data['Datum'] = nacht_data['Timestamp'].dt.date
     
-    # Kies 20 random nachten (op basis van unieke datums)
-    unieke_nachten = nacht_data['Datum'].drop_duplicates()
-    if len(unieke_nachten) >= 20:
-        random_nachten = unieke_nachten.sample(20, random_state=42)
-    else:
-        random_nachten = unieke_nachten  # Als er minder dan 20 nachten beschikbaar zijn
+    # Gemiddeld verbruik per kolom per nacht (over 4 uren)
+    gemiddeld_per_nacht = nacht_data.groupby('Datum')[waarde_kolommen].mean()
     
-    # Filter de data op de geselecteerde 20 nachten
-    nacht_data_geselecteerd = nacht_data[nacht_data['Datum'].isin(random_nachten)]
-    
-    # Zet waardes om naar numeriek (verwijder eenheden zoals 'kWh', 'MWh' etc.)
-    for col in waarde_kolommen:
-        data[col] = data[col].astype(str).str.extract(r'([\d\.,]+)')[0]
-        data[col] = data[col].str.replace(',', '.', regex=False)
-        data[col] = pd.to_numeric(data[col], errors='coerce').fillna(0)
-    
-        nacht_data_geselecteerd[col] = nacht_data_geselecteerd[col].astype(str).str.extract(r'([\d\.,]+)')[0]
-        nacht_data_geselecteerd[col] = nacht_data_geselecteerd[col].str.replace(',', '.', regex=False)
-        nacht_data_geselecteerd[col] = pd.to_numeric(nacht_data_geselecteerd[col], errors='coerce').fillna(0)
-    
-    # Bereken gemiddeld verbruik per nacht (over 4 nachturen)
-    gemiddeld_per_nacht = nacht_data_geselecteerd.groupby('Datum')[waarde_kolommen].mean()
-    
-    # Bereken het gemiddelde van die nachtgems → dit is je basisverbruik per categorie
+    # Gemiddelde over alle nachten per kolom (basisverbruik)
     basiswaarden = {}
     for col in waarde_kolommen:
         basiswaarden[col] = gemiddeld_per_nacht[col].mean()
         if pd.isna(basiswaarden[col]):
             basiswaarden[col] = 0
     
-    # Trek het basisverbruik af van elke waarde in de dataset
+    # Trek basisverbruik af van elke waarde in data (per kolom)
     for col in waarde_kolommen:
         data[col] = data[col] - basiswaarden[col]
 
