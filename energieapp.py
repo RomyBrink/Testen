@@ -40,14 +40,13 @@ if uploaded_files:
     ]
     data = data.drop(columns=[col for col in te_verwijderen_kolommen if col in data.columns])
 
-    # ** Basisverbruikscorrectie toevoegen **
-
-    # Tijdcomponenten voorlopig nodig om te filteren (tijd verwerken voorlopig met minimal parsing)
+    # Timestamp verwerken
     data['Timestamp_clean'] = data['Timestamp'].astype(str).str.split('+').str[0]
     data['Timestamp'] = pd.to_datetime(data['Timestamp_clean'], errors='coerce')
     data.drop(columns=['Timestamp_clean'], inplace=True)
     data = data.dropna(subset=['Timestamp'])
 
+    # Tijdcomponenten
     data['Jaar'] = data['Timestamp'].dt.year
     data['Maand'] = data['Timestamp'].dt.month
     data['Dag'] = data['Timestamp'].dt.day
@@ -56,46 +55,33 @@ if uploaded_files:
     tijd_kolommen = ['Timestamp', 'Jaar', 'Maand', 'Dag', 'Uur']
     waarde_kolommen = [col for col in data.columns if col not in tijd_kolommen]
 
-    # Filter uren 0 t/m 4
-    nacht_data = data[(data['Uur'] >= 0) & (data['Uur'] <= 4)]
-
-    # Selecteer 5 willekeurige nachten (jaar-maand-dag)
-    unieke_nachten = nacht_data[['Jaar', 'Maand', 'Dag']].drop_duplicates()
-    if len(unieke_nachten) >= 5:
-        random_nachten = unieke_nachten.sample(5, random_state=42)
-    else:
-        random_nachten = unieke_nachten
-
-    # Filter nacht_data op geselecteerde nachten
-    mask = nacht_data.apply(lambda row: ((row['Jaar'], row['Maand'], row['Dag']) 
-                                        in list(random_nachten.itertuples(index=False, name=None))), axis=1)
-    nacht_data_geselecteerd = nacht_data[mask]
-
-    # Bereken basiswaarden per categorie
+    # Basiswaarden berekenen: gemiddeld tussen 00:00-04:00 van 5 willekeurige nachten
     basiswaarden = {}
+    # Neem unieke dagen (Timestamp datum zonder tijd)
+    data['Datum'] = data['Timestamp'].dt.floor('D')
+    unieke_dagen = data['Datum'].drop_duplicates().sample(n=5, random_state=42) if len(data['Datum'].unique()) >= 5 else data['Datum'].drop_duplicates()
+    
+    # Filter op de geselecteerde nachten en uren 0-4
+    nacht_data_geselecteerd = data[(data['Datum'].isin(unieke_dagen)) & (data['Uur'].between(0, 4))].copy()
 
     for col in waarde_kolommen:
-        nacht_data_geselecteerd[col] = pd.to_numeric(nacht_data_geselecteerd[col], errors='coerce')
-        basiswaarden[col] = nacht_data_geselecteerd[col].mean()
+        # Converteer naar numeriek, niet numerieke waarden worden NaN
+        nacht_data_geselecteerd[col] = pd.to_numeric(nacht_data_geselecteerd[col].astype(str).str.replace(',', '.'), errors='coerce')
+        # Vul NaN met 0 voor gemiddelde berekening
+        basiswaarde = nacht_data_geselecteerd[col].fillna(0).mean()
+        basiswaarden[col] = basiswaarde
 
-    # Trek basiswaarden af van alle waarden
+    # Zet ook in de volledige data de waardes om naar numeriek
     for col in waarde_kolommen:
-        if col in data.columns:
-            data[col] = data[col] - basiswaarden[col]
+        data[col] = pd.to_numeric(data[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+        # Trek basiswaarde af
+        data[col] = data[col] - basiswaarden[col]
+        # Ondergrens 0
+        data[col] = data[col].clip(lower=0)
 
-    # Voorkom negatieve waarden
-    for col in waarde_kolommen:
-        if col in data.columns:
-            data[col] = data[col].clip(lower=0)
-
-    # Nu data opnieuw smelten en verder verwerken
+    # Data opnieuw 'smelten'
     data_melted = data.melt(id_vars=tijd_kolommen, value_vars=waarde_kolommen,
                             var_name='Categorie', value_name='Waarde')
-
-    # Waarde opschonen
-    data_melted['Waarde'] = data_melted['Waarde'].astype(str).str.extract(r'([\d\.,]+)')[0]
-    data_melted['Waarde'] = data_melted['Waarde'].str.replace(',', '.', regex=False)
-    data_melted['Waarde'] = pd.to_numeric(data_melted['Waarde'], errors='coerce')
 
     # Filters bovenaan
     st.header("📦 Filters")
