@@ -2,10 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import numpy as np
 
 st.set_page_config(page_title="Energie Dashboard", layout="wide")
 st.title("🔋 Interactief Energie Dashboard")
 
+# Upload CSV-bestanden
 uploaded_files = st.file_uploader("📤 Upload één of meerdere CSV-bestanden", type=["csv"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -17,14 +19,34 @@ if uploaded_files:
         except Exception as e:
             st.error(f"❌ Fout bij inlezen van {file.name}: {str(e)}")
 
+    # Combineer data
     data = pd.concat(dataframes, ignore_index=True)
     data.columns = data.columns.str.strip()
     data = data.rename(columns={data.columns[0]: 'Timestamp'})
+
+    # Kolommen verwijderen
+    te_verwijderen_kolommen = [
+        "RAK1 1 NUCLEAIR CT15 kWh (kWh)",
+        "LK5 1 II P1 CT643 kWh (kWh)",
+        "LK5 4 II P1 CT943 kWh (kWh)",
+        "LK4 4 I P1 CT543 kWh (kWh)",
+        "LK4 2 II P1 CT753 kWh (kWh)",
+        "Elektriciteit kW (kW)",
+        "WKO TSA 1 Energiemeting pompen 29CP2/3 (kWh)",
+        "Afgifteset Inductie units Energiemeting pompen 34CP2/3/4 (kWh)",
+        "WKO elektra pompen 33TP1/2/3 Energiemeting pompen 33TP1/2/3 (kWh)",
+        "WKO elektra pompen 32TP1/2/3 Energiemeting pompen 32TP1/2/3 (kWh)",
+        "LK5 3 I P1 CT453 kWh (kWh)"
+    ]
+    data = data.drop(columns=[col for col in te_verwijderen_kolommen if col in data.columns])
+
+    # Timestamp verwerken
     data['Timestamp_clean'] = data['Timestamp'].astype(str).str.split('+').str[0]
     data['Timestamp'] = pd.to_datetime(data['Timestamp_clean'], errors='coerce')
     data.drop(columns=['Timestamp_clean'], inplace=True)
     data = data.dropna(subset=['Timestamp'])
 
+    # Tijdcomponenten
     data['Jaar'] = data['Timestamp'].dt.year
     data['Maand'] = data['Timestamp'].dt.month
     data['Dag'] = data['Timestamp'].dt.day
@@ -36,30 +58,32 @@ if uploaded_files:
     data_melted = data.melt(id_vars=tijd_kolommen, value_vars=waarde_kolommen,
                             var_name='Categorie', value_name='Waarde')
 
+    # Waarde opschonen
     data_melted['Waarde'] = data_melted['Waarde'].astype(str).str.extract(r'([\d\.,]+)')[0]
     data_melted['Waarde'] = data_melted['Waarde'].str.replace(',', '.', regex=False)
     data_melted['Waarde'] = pd.to_numeric(data_melted['Waarde'], errors='coerce')
 
+    # Filters bovenaan
     st.header("📦 Filters")
 
-    # Categorie filter
+    # Filter Categorieën
     categorieen = sorted(data_melted['Categorie'].dropna().unique())
     geselecteerde_categorieen = st.multiselect("Selecteer categorieën", categorieen, default=categorieen)
     data_filtered = data_melted[data_melted['Categorie'].isin(geselecteerde_categorieen)]
 
-    # Jaar filter
+    # Filter Jaar
     beschikbare_jaren = sorted(data_filtered['Jaar'].dropna().unique())
     jaar_selectie = st.selectbox("📅 Selecteer jaar", beschikbare_jaren, index=len(beschikbare_jaren) - 1)
 
-    # Maand filter
+    # Filter Maand
     beschikbare_maanden = sorted(data_filtered[data_filtered['Jaar'] == jaar_selectie]['Maand'].unique())
     maand_selectie = st.selectbox("🗓️ Selecteer maand", beschikbare_maanden)
 
-    # Dag filter
+    # Filter Dag
     beschikbare_dagen = sorted(data_filtered[(data_filtered['Jaar'] == jaar_selectie) & (data_filtered['Maand'] == maand_selectie)]['Dag'].unique())
     dag_selectie = st.selectbox("📆 Selecteer dag", beschikbare_dagen)
 
-    # =================== GRAFIEK 1: Jaar met trendlijn ===================
+    # ========== GRAFIEK 1: Jaaroverzicht met trendlijn ==========
     st.subheader(f"📊 Jaaroverzicht: totaal per maand ({jaar_selectie})")
 
     jaar_data = data_filtered[data_filtered['Jaar'] == jaar_selectie]
@@ -81,7 +105,7 @@ if uploaded_files:
             offsetgroup=cat
         ))
 
-    # Lijn per categorie vorig jaar
+    # Lijn per categorie vorig jaar (trendlijn)
     for cat in geselecteerde_categorieen:
         df_cat_vorig = maand_aggregatie_vorig_jaar[maand_aggregatie_vorig_jaar['Categorie'] == cat]
         fig.add_trace(go.Scatter(
@@ -102,7 +126,7 @@ if uploaded_files:
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # =================== GRAFIEK 2: Maand (per dag) ===================
+    # ========== GRAFIEK 2: Maandoverzicht (per dag) ==========
     st.subheader(f"📆 Maandoverzicht: totaal per dag ({jaar_selectie}-{maand_selectie})")
     maand_data = jaar_data[jaar_data['Maand'] == maand_selectie]
 
@@ -116,7 +140,7 @@ if uploaded_files:
     )
     st.plotly_chart(fig_maand, use_container_width=True)
 
-    # =================== GRAFIEK 3: Dag (per uur) ===================
+    # ========== GRAFIEK 3: Dagoverzicht (per uur) ==========
     st.subheader(f"⏰ Dagoverzicht: totaal per uur ({dag_selectie}-{maand_selectie}-{jaar_selectie})")
     dag_data = maand_data[maand_data['Dag'] == dag_selectie]
 
@@ -129,6 +153,39 @@ if uploaded_files:
         title=f"Uurtotalen voor {dag_selectie}-{maand_selectie}-{jaar_selectie}"
     )
     st.plotly_chart(fig_dag, use_container_width=True)
+
+    # ========== GRAFIEK 4: Heatmap gestandaardiseerde uitschieters ==========
+    st.subheader("🌡️ Heatmap uitschieters per categorie per maand")
+
+    heatmap_data = data_filtered.copy()
+
+    # Bereken mean en std per categorie
+    stats = heatmap_data.groupby('Categorie')['Waarde'].agg(['mean', 'std']).reset_index()
+
+    # Voeg stats toe aan heatmap_data voor standaardiseren
+    heatmap_data = heatmap_data.merge(stats, on='Categorie', how='left')
+
+    # Standaardiseer de waarden per categorie
+    heatmap_data['Waarde_std'] = (heatmap_data['Waarde'] - heatmap_data['mean']) / heatmap_data['std']
+
+    # Groepeer per categorie en maand (gemiddelde gestandaardiseerde waarde)
+    heatmap_agg = heatmap_data.groupby(['Categorie', 'Maand'])['Waarde_std'].mean().reset_index()
+
+    # Pivot voor heatmap (Categorieën als rijen, Maanden als kolommen)
+    heatmap_pivot = heatmap_agg.pivot(index='Categorie', columns='Maand', values='Waarde_std').fillna(0)
+
+    # Plot heatmap
+    fig_heatmap = px.imshow(
+        heatmap_pivot,
+        labels=dict(x="Maand", y="Categorie", color="Gestandaardiseerde waarde"),
+        x=heatmap_pivot.columns,
+        y=heatmap_pivot.index,
+        color_continuous_scale='RdBu',
+        zmin=-3, zmax=3,  # Kleurenschaal gefixeerd op ±3 std-dev om uitschieters te benadrukken
+        title="Heatmap van gestandaardiseerde waarden per categorie per maand"
+    )
+
+    st.plotly_chart(fig_heatmap, use_container_width=True)
 
     # Preview ruwe data
     with st.expander("📄 Bekijk ruwe data"):
